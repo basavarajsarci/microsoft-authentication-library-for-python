@@ -131,7 +131,7 @@ class AbstractBaseClient(ABC):  # TODO: Should this be a non-abstract but sans-i
 
         _data.update(self.default_body)  # It may contain authen parameters
         _data.update(data or {})  # So the content in data param prevails
-        # We don't have to clean up None values here, because requests lib will.
+        _data = {k: v for k, v in _data.items() if v}  # Clean up None values
 
         if _data.get('scope'):
             _data['scope'] = self._stringify(_data['scope'])
