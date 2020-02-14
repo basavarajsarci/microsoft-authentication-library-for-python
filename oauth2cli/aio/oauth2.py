@@ -35,8 +35,12 @@ class BaseClient(AbstractBaseClient):
                 timeout=timeout or self.timeout,
                 **dict(kwargs, **self._prepare_request(
                     grant_type, params=params, data=data, headers=headers))
-                ) as response:
-            return self._parse_resposne(await response.json())
+                ) as resp:
+            # aiohttp defines "status", others define "status_code"
+            status_code = getattr(resp, "status_code", None) or resp.status
+            if status_code >= 500:
+                resp.raise_for_status()  # TODO: Will probably retry here
+            return self._parse_resposne(await resp.text())
 
     async def obtain_token_by_refresh_token(
             self,
@@ -71,6 +75,5 @@ class Client(BaseClient):
         """
         data = kwargs.pop("data", {})
         data.update(scope=scope)
-        result = await self._obtain_token("client_credentials", data=data, **kwargs)
-        return result
+        return await self._obtain_token("client_credentials", data=data, **kwargs)
 
