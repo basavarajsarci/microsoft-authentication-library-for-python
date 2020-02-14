@@ -113,7 +113,7 @@ class AbstractBaseClient(ABC):  # TODO: Should this be a non-abstract but sans-i
             return ' '.join(sorted(sequence))  # normalizing it, ascendingly
         return sequence  # as-is
 
-    def _prepare_request(  # The verb "obtain" is influenced by OAUTH2 RFC 6749
+    def _prepare_token_request(
             self, grant_type,
             params=None,  # a dict to be sent as query string to the endpoint
             data=None,  # All relevant data, which will go into the http body
@@ -153,7 +153,7 @@ class AbstractBaseClient(ABC):  # TODO: Should this be a non-abstract but sans-i
 
         return dict(params=params, data=_data, headers=_headers)
 
-    def _parse_resposne(self, body):
+    def _parse_token_resposne(self, body):
         try:
             # The spec (https://tools.ietf.org/html/rfc6749#section-5.2) says
             # even an error response will be a valid json structure,
@@ -184,13 +184,13 @@ class BaseClient(AbstractBaseClient):
         resp = (post or self.session.post)(
             self.configuration["token_endpoint"],
             timeout=timeout or self.timeout,
-            **dict(kwargs, **self._prepare_request(
+            **dict(kwargs, **self._prepare_token_request(
                 grant_type, params=params, data=data,
                 headers=dict(self.default_headers, **(headers or {})),
                 )))
         if resp.status_code >= 500:
             resp.raise_for_status()  # TODO: Will probably retry here
-        return self._parse_resposne(resp.text)
+        return self._parse_token_resposne(resp.text)
 
     def obtain_token_by_refresh_token(self, refresh_token, scope=None, **kwargs):
         # type: (str, Union[str, list, set, tuple]) -> dict
