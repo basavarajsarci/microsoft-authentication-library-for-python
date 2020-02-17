@@ -25,7 +25,6 @@ except AttributeError:  # Python 2.7, abc exists, but not ABC
 
 
 class AbstractBaseClient(ABC):
-    # We choose to implement all 4 grants in 1 class
     # The common code shared by sync and async clients.
     # More on Client Types at https://tools.ietf.org/html/rfc6749#section-2.1
 
@@ -50,11 +49,13 @@ class AbstractBaseClient(ABC):
             self,
             server_configuration,  # type: dict
             client_id,  # type: str
+            session,  # type: A requests session, or an aiohttp.ClientSession
             client_secret=None,  # type: Optional[str]
             client_assertion=None,  # type: Union[bytes, callable, None]
             client_assertion_type=None,  # type: Optional[str]
             default_headers=None,  # type: Optional[dict]
             default_body=None,  # type: Optional[dict]
+            timeout=None,  # type: Union[tuple, float, None]
             ):
         """Initialize a client object to talk all the OAuth2 grants to the server.
 
@@ -69,6 +70,7 @@ class AbstractBaseClient(ABC):
                 or
                 https://example.com/.../.well-known/openid-configuration
             client_id (str): The client's id, issued by the authorization server
+            session (object): A requests session or an aiohttp ClientSession
             client_secret (str):  Triggers HTTP AUTH for Confidential Client
             client_assertion (bytes, callable):
                 The client assertion to authenticate this client, per RFC 7521.
@@ -98,6 +100,8 @@ class AbstractBaseClient(ABC):
             self.default_body["client_assertion_type"] = client_assertion_type
         self.logger = logging.getLogger(__name__)
         self.default_headers = default_headers or {}
+        self.session = session
+        self.timeout = timeout
 
     def _build_auth_request_params(self, response_type, **kwargs):
         # response_type is a string defined in
@@ -218,24 +222,11 @@ class AbstractBaseClient(ABC):
 
 
 class BaseClient(AbstractBaseClient):
+    # We choose to implement all 4 grants in 1 class
     """This class implements OAuth2 methods.
 
     Its methods define and document parameters mentioned in OAUTH2 RFC 6749.
     """
-    def __init__(
-            self,
-            server_configuration,  # type: dict
-            client_id,  # type: str
-            verify=True,  # type: Union[str, True, False, None]
-            proxies=None,  # type: Optional[dict]
-            timeout=None,  # type: Union[tuple, float, None]
-            session=None,  # type: requests.Session
-            **kwargs):
-        super(BaseClient, self).__init__(server_configuration, client_id, **kwargs)
-        self.session = session or requests.Session()
-        self.session.verify = verify
-        self.session.proxies = proxies or {}
-        self.timeout = timeout
 
     def _obtain_token(  # The verb "obtain" is influenced by OAUTH2 RFC 6749
             self, grant_type,
@@ -312,7 +303,7 @@ class BaseClient(AbstractBaseClient):
         now = time.time()
         skew = 1
         if flow.get("latest_attempt_at", 0) + flow.get("interval", 5) - skew > now:
-            warnings.warn('Attempted too soon. Please do time.sleep(flow["interval"])')
+            warnings.warn('Attempted too soon. Please do sleep(flow["interval"])')
         data = kwargs.pop("data", {})
         data.update({
             "client_id": self.client_id,
@@ -321,7 +312,7 @@ class BaseClient(AbstractBaseClient):
         result = self._obtain_token(
             self.DEVICE_FLOW["GRANT_TYPE"], data=data, **kwargs)
         if result.get("error") == "slow_down":
-            # Respecting https://tools.ietf.org/html/draft-ietf-oauth-device-flow-12#section-3.5
+            # Honor https://tools.ietf.org/html/draft-ietf-oauth-device-flow-12#section-3.5
             flow["interval"] = flow.get("interval", 5) + 5
         flow["latest_attempt_at"] = now
         return result
@@ -329,6 +320,7 @@ class BaseClient(AbstractBaseClient):
     def obtain_token_by_device_flow(self,
             flow,
             exit_condition=lambda flow: flow.get("expires_at", 0) < time.time(),
+            sleeper=time.sleep,  # Just for API symmetry with async API
             **kwargs):
         # type: (dict, Callable) -> dict
         """Obtain token by a device flow object, with customizable polling effect.
@@ -362,7 +354,7 @@ class BaseClient(AbstractBaseClient):
             for i in range(flow.get("interval", 5)):  # Wait interval seconds
                 if exit_condition(flow):
                     return result
-                time.sleep(1)  # Shorten each round, to make exit more responsive
+                sleeper(1)  # Shorten each round, to make exit more responsive
 
     def obtain_token_by_authorization_code(
             self, code, redirect_uri=None, scope=None, **kwargs):
@@ -432,15 +424,16 @@ class BaseClient(AbstractBaseClient):
 
 
 class AbstractClient(AbstractBaseClient):
+    # It contains common code between sync and async Client
 
     def __init__(self,
-            server_configuration, client_id,
+            server_configuration, client_id, session,
             on_obtaining_tokens=lambda event: None,  # event is defined in _obtain_token(...)
             on_removing_rt=lambda token_item: None,
             on_updating_rt=lambda token_item, new_rt: None,
             **kwargs):
         super(AbstractClient, self).__init__(
-            server_configuration, client_id, **kwargs)
+            server_configuration, client_id, session, **kwargs)
         self.on_obtaining_tokens = on_obtaining_tokens
         self.on_removing_rt = on_removing_rt
         self.on_updating_rt = on_updating_rt

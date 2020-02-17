@@ -90,6 +90,7 @@ class TestClient(Oauth2TestCase):
             cls.client = Client(
                 CONFIG["openid_configuration"],
                 CONFIG['client_id'],
+                requests.Session(),
                 client_assertion=JwtSigner(
                         private_key,
                         algorithm="RS256",
@@ -102,7 +103,7 @@ class TestClient(Oauth2TestCase):
                 )
         else:
             cls.client = Client(
-                CONFIG["openid_configuration"], CONFIG['client_id'],
+                CONFIG["openid_configuration"], CONFIG['client_id'], requests.Session(),
                 client_secret=CONFIG.get('client_secret'))
 
     @unittest.skipIf(
@@ -160,7 +161,8 @@ class TestClient(Oauth2TestCase):
         duration = 30
         logger.warning("We will wait up to %d seconds for you to sign in" % duration)
         flow["expires_at"] = time.time() + duration  # Shorten the time for quick test
-        result = self.client.obtain_token_by_device_flow(flow)
+        result = self.client.obtain_token_by_device_flow(flow,
+            data={"code": flow["device_code"]})  # A workaround for one IdP
         self.assertLoosely(
                 result,
                 assertion=lambda: self.assertIn('access_token', result),
